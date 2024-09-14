@@ -1,9 +1,16 @@
 <script lang="ts">
-	import { T } from '@threlte/core';
+	import { T, useTask } from '@threlte/core';
 	import { OrbitControls, useTexture } from '@threlte/extras';
 
 	export let width: number;
 	export let url: string;
+
+	let x = 0;
+	let rotation = 0;
+	useTask((delta) => {
+		rotation = 0.25 * Math.sin(x);
+		x += delta;
+	});
 
 	$: texture = useTexture(url);
 </script>
@@ -16,7 +23,7 @@
 <T.AmbientLight />
 
 {#await texture then map}
-	<T.Mesh>
+	<T.Mesh rotation.y={rotation}>
 		<T.PlaneGeometry args={[width, map.source.data.height]} />
 		<T.MeshStandardMaterial {map} />
 	</T.Mesh>
