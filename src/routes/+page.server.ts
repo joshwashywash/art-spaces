@@ -1,4 +1,4 @@
-import { redirect } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import type { UnionToTuple } from 'type-fest';
 
@@ -15,6 +15,12 @@ type Config = {
 type Artwork = {
 	data: Data;
 	config: Config;
+};
+
+type NotFound = {
+	status: 404;
+	error: 'Not Found';
+	detail: 'The item you requested cannot be found.';
 };
 
 type Field = keyof Data;
@@ -39,12 +45,13 @@ export const load: PageServerLoad = async (event) => {
 	const url = new URL(id, baseUrl);
 	url.searchParams.append('fields', fields);
 
-	const artwork: Artwork = await event
-		.fetch(url)
-		.then((response) => response.json());
-
-	return {
-		url: `${artwork.config.iiif_url}/${artwork.data.image_id}/full/${width},/0/default.jpg`,
-		width,
-	};
+	const response = await event.fetch(url);
+	if (response.ok) {
+		const artwork: Promise<Artwork> = response.json();
+		return {
+			artwork,
+			width,
+		};
+	}
+	error(response.status, response.statusText);
 };

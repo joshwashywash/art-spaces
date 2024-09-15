@@ -5,7 +5,10 @@
 	let { data } = $props();
 </script>
 
-<Canvas>
-	<T.Color args={['black']} attach="background" />
-	<Scene width={data.width} url={data.url} />
-</Canvas>
+{#await data.artwork then artwork}
+	{@const url = `${artwork.config.iiif_url}/${artwork.data.image_id}/full/${data.width},/0/default.jpg`}
+	<Canvas>
+		<T.Color args={['black']} attach="background" />
+		<Scene width={data.width} {url} />
+	</Canvas>
+{/await}
