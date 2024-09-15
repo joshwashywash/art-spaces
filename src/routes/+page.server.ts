@@ -39,7 +39,7 @@ export const load: PageServerLoad = async (event) => {
 	const url = new URL(id, baseUrl);
 	url.searchParams.append('fields', fields);
 
-	const artwork: Artwork | ArtworkNotFoundJson = await event
+	const artwork: Artwork = await event
 		.fetch(url)
 		.then((response) => response.json());
 
