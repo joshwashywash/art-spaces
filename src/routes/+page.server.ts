@@ -24,21 +24,22 @@ const width = 843;
 
 const baseUrl = new URL('https://api.artic.edu/api/v1/artworks/');
 // the api does not care whether it's fields=image_id,title or fields=title,image_id
-const fields: UnionToTuple<Field> = ['image_id', 'title'];
-baseUrl.searchParams.append('fields', fields.join(','));
+const fieldsTuple: UnionToTuple<Field> = ['image_id', 'title'];
+const fields = fieldsTuple.join(',');
 
-const DEFAULT_ARTWORK_ID = 129884;
+const DEFAULT_ARTWORK_ID = '129884';
 
 export const load: PageServerLoad = async (event) => {
 	const id = event.url.searchParams.get('id');
 	if (id === null) {
-		event.url.searchParams.append('id', `${DEFAULT_ARTWORK_ID}`);
+		event.url.searchParams.append('id', DEFAULT_ARTWORK_ID);
 		redirect(307, event.url);
 	}
 
 	const url = new URL(id, baseUrl);
+	url.searchParams.append('fields', fields);
 
-	const artwork: Artwork = await event
+	const artwork: Artwork | ArtworkNotFoundJson = await event
 		.fetch(url)
 		.then((response) => response.json());
 
