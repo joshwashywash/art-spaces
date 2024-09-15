@@ -17,12 +17,6 @@ type Artwork = {
 	config: Config;
 };
 
-type NotFound = {
-	status: 404;
-	error: 'Not Found';
-	detail: 'The item you requested cannot be found.';
-};
-
 type Field = keyof Data;
 
 // api recommends this width
