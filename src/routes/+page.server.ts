@@ -1,51 +1,113 @@
-import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import type { UnionToTuple } from 'type-fest';
+import { Context, Effect, Layer } from 'effect';
+import {
+	FetchHttpClient,
+	HttpClient,
+	HttpClientError,
+	HttpClientRequest,
+	HttpClientResponse,
+} from '@effect/platform';
+import { ParseResult, Schema } from '@effect/schema';
+import { error, redirect } from '@sveltejs/kit';
+
+// TODO: move artworks stuff into a separate file
 
 // which fields should be returned from the api
-type Data = {
-	image_id: string;
-	title: string;
-};
+const Data = Schema.Struct({
+	image_id: Schema.String,
+	title: Schema.String,
+});
 
-type Config = {
-	iiif_url: string;
-};
+const Config = Schema.Struct({
+	iiif_url: Schema.String,
+});
 
-type Artwork = {
-	data: Data;
-	config: Config;
-};
+class Artwork extends Schema.Class<Artwork>('Artwork')({
+	data: Data,
+	config: Config,
+}) {}
 
-type Field = keyof Data;
+class ArtworksService extends Context.Tag('ArtworkService')<
+	ArtworksService,
+	{
+		readonly getById: (
+			id: string,
+		) => Effect.Effect<
+			Artwork,
+			ParseResult.ParseError | HttpClientError.HttpClientError
+		>;
+	}
+>() {}
 
-// api recommends this width
-const width = 843;
+// order does not matter
+const fields = Object.keys(Data.fields).join(',');
 
-const baseUrl = new URL('https://api.artic.edu/api/v1/artworks/');
-// the api does not care whether it's fields=image_id,title or fields=title,image_id
-const fieldsTuple: UnionToTuple<Field> = ['image_id', 'title'];
-const fields = fieldsTuple.join(',');
+const makeArtworksService = Effect.gen(function* () {
+	const defaultClient = yield* HttpClient.HttpClient;
+	const client = defaultClient.pipe((s) =>
+		s.pipe(
+			HttpClient.filterStatusOk,
+			HttpClient.mapRequest((r) =>
+				r.pipe(
+					HttpClientRequest.prependUrl(
+						'https://api.artic.edu/api/v1/artworks/',
+					),
+					HttpClientRequest.appendUrlParam('field', fields),
+				),
+			),
+		),
+	);
+	return ArtworksService.of({
+		getById: (id) =>
+			client
+				.get(`/${id}`)
+				.pipe(
+					Effect.flatMap(HttpClientResponse.schemaBodyJson(Artwork)),
+					Effect.scoped,
+				),
+	});
+});
+
+const ArtworksServiceLive = Layer.effect(
+	ArtworksService,
+	makeArtworksService,
+).pipe(Layer.provide(FetchHttpClient.layer));
 
 const DEFAULT_ARTWORK_ID = '129884';
 
+const width = 843;
+
 export const load: PageServerLoad = async (event) => {
 	const id = event.url.searchParams.get('id');
+
+	// TODO: don't reuse the event.url
 	if (id === null) {
 		event.url.searchParams.append('id', DEFAULT_ARTWORK_ID);
 		redirect(307, event.url);
 	}
 
-	const url = new URL(id, baseUrl);
-	url.searchParams.append('fields', fields);
-
-	const response = await event.fetch(url);
-	if (response.ok) {
-		const artwork: Promise<Artwork> = response.json();
-		return {
-			artwork,
+	// TODO: is this the best way to do this???
+	const result = await Effect.gen(function* () {
+		const artworks = yield* ArtworksService;
+		return yield* artworks.getById(id);
+	}).pipe(
+		Effect.map(({ config, data }) => ({
 			width,
-		};
+			url: `${config.iiif_url}/${data.image_id}/full/${width},/0/default.jpg`,
+		})),
+		Effect.catchTags({
+			RequestError: ({ message }) => Effect.succeed({ status: 500, message }),
+			ResponseError: ({ response: { status }, message }) =>
+				Effect.succeed({ status, message }),
+			ParseError: ({ message }) => Effect.succeed({ status: 500, message }),
+		}),
+		Effect.provide(ArtworksServiceLive),
+		Effect.provideService(FetchHttpClient.Fetch, event.fetch),
+		Effect.runPromise,
+	);
+
+	if ('status' in result) {
+		error(result.status, result.message);
 	}
-	error(response.status, response.statusText);
+	return result;
 };
