@@ -39,9 +39,6 @@ class ArtworksService extends Context.Tag('ArtworkService')<
 	}
 >() {}
 
-// order does not matter
-const fields = Object.keys(Data.fields).join(',');
-
 const makeArtworksService = Effect.gen(function* () {
 	const defaultClient = yield* HttpClient.HttpClient;
 	const client = defaultClient.pipe((s) =>
@@ -52,7 +49,10 @@ const makeArtworksService = Effect.gen(function* () {
 					HttpClientRequest.prependUrl(
 						'https://api.artic.edu/api/v1/artworks/',
 					),
-					HttpClientRequest.appendUrlParam('field', fields),
+					HttpClientRequest.appendUrlParam(
+						'field',
+						Object.keys(Data.fields).join(','), // order does not matter here
+					),
 				),
 			),
 		),
@@ -73,35 +73,41 @@ const ArtworksServiceLive = Layer.effect(
 	makeArtworksService,
 ).pipe(Layer.provide(FetchHttpClient.layer));
 
-const DEFAULT_ARTWORK_ID = '129884';
+const createArtworkMap = (width: number) => (a: Artwork) => ({
+	width,
+	url: `${a.config.iiif_url}/${a.data.image_id}/full/${width},/0/default.jpg`,
+});
 
-const width = 843;
+const recover = (message: string, status = 500) =>
+	Effect.succeed({ status, message });
+
+const p = (id: string, width = 843) =>
+	Effect.gen(function* () {
+		const artworks = yield* ArtworksService;
+		return yield* artworks.getById(id);
+	}).pipe(
+		Effect.map(createArtworkMap(width)),
+		Effect.catchTags({
+			RequestError: ({ message }) => recover(message),
+			ResponseError: ({ response: { status }, message }) =>
+				recover(message, status),
+			ParseError: ({ message }) => recover(message),
+		}),
+		Effect.provide(ArtworksServiceLive),
+	);
 
 export const load: PageServerLoad = async (event) => {
 	const id = event.url.searchParams.get('id');
 
 	// TODO: don't reuse the event.url
 	if (id === null) {
-		event.url.searchParams.append('id', DEFAULT_ARTWORK_ID);
+		event.url.searchParams.append('id', '129884');
 		redirect(307, event.url);
 	}
 
 	// TODO: is this the best way to do this???
-	const result = await Effect.gen(function* () {
-		const artworks = yield* ArtworksService;
-		return yield* artworks.getById(id);
-	}).pipe(
-		Effect.map(({ config, data }) => ({
-			width,
-			url: `${config.iiif_url}/${data.image_id}/full/${width},/0/default.jpg`,
-		})),
-		Effect.catchTags({
-			RequestError: ({ message }) => Effect.succeed({ status: 500, message }),
-			ResponseError: ({ response: { status }, message }) =>
-				Effect.succeed({ status, message }),
-			ParseError: ({ message }) => Effect.succeed({ status: 500, message }),
-		}),
-		Effect.provide(ArtworksServiceLive),
+	//
+	const result = await p(id).pipe(
 		Effect.provideService(FetchHttpClient.Fetch, event.fetch),
 		Effect.runPromise,
 	);
